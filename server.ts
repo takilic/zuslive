@@ -3,17 +3,8 @@ import fs from "fs";
 import path from "path";
 import { createServer as createViteServer } from "vite";
 import { Channel, Category, User, SubscriptionPlan, Analytics } from "./src/types.ts";
-import { initializeApp } from "firebase/app";
-import { 
-  initializeFirestore, 
-  collection, 
-  onSnapshot, 
-  doc, 
-  setDoc, 
-  deleteDoc, 
-  getDocs, 
-  writeBatch 
-} from "firebase/firestore";
+import * as admin from "firebase-admin";
+import { getFirestore } from "firebase-admin/firestore";
 
 const app = express();
 const PORT = 3000;
@@ -196,7 +187,6 @@ function getInitialData() {
 
 // Database helper functions
 let isFirebaseInitialized = false;
-let firebaseApp: any = null;
 let firestoreDb: any = null;
 let isFirebaseSyncingFromFirestore = false;
 let listenersActive = false;
@@ -206,19 +196,16 @@ const firebaseConfigPath = path.join(process.cwd(), "firebase-applet-config.json
 if (fs.existsSync(firebaseConfigPath)) {
   try {
     const config = JSON.parse(fs.readFileSync(firebaseConfigPath, "utf-8"));
-    if (config.projectId && config.apiKey) {
-      console.log("[FIREBASE] Initializing persistent Firestore client with database ID:", config.firestoreDatabaseId || "(default)");
-      firebaseApp = initializeApp({
-        apiKey: config.apiKey,
-        authDomain: config.authDomain,
-        projectId: config.projectId,
-        appId: config.appId
+    if (config.projectId) {
+      console.log("[FIREBASE] Initializing persistent server-side Firestore admin client with database ID:", config.firestoreDatabaseId || "(default)");
+      admin.initializeApp({
+        projectId: config.projectId
       });
-      firestoreDb = initializeFirestore(firebaseApp, {}, config.firestoreDatabaseId || "(default)");
+      firestoreDb = (admin as any).firestore(config.firestoreDatabaseId || "(default)");
       isFirebaseInitialized = true;
     }
   } catch (error) {
-    console.error("[FIREBASE ERROR] Could not read firebase config or initialize client SDK:", error);
+    console.error("[FIREBASE ERROR] Could not read firebase config or initialize admin SDK:", error);
   }
 }
 
@@ -279,27 +266,27 @@ async function syncToFirestore(dbData: any) {
     
     // 1. Sync small configuration entities
     for (const cat of dbData.categories) {
-      await setDoc(doc(firestoreDb, "categories", cat.id), cat);
+      await firestoreDb.collection("categories").doc(cat.id).set(cat);
     }
     for (const plan of dbData.subscriptionPlans) {
-      await setDoc(doc(firestoreDb, "subscriptionPlans", plan.id), plan);
+      await firestoreDb.collection("subscriptionPlans").doc(plan.id).set(plan);
     }
     for (const usr of dbData.users) {
-      await setDoc(doc(firestoreDb, "users", usr.id), usr);
+      await firestoreDb.collection("users").doc(usr.id).set(usr);
     }
     
     // 2. Sync Channels (batched for performance up to 500 records)
     const channels = dbData.channels;
-    let batch = writeBatch(firestoreDb);
+    let batch = firestoreDb.batch();
     let count = 0;
     
     for (const chan of channels) {
-      const channelRef = doc(firestoreDb, "channels", chan.id);
+      const channelRef = firestoreDb.collection("channels").doc(chan.id);
       batch.set(channelRef, chan);
       count++;
       if (count === 500) {
         await batch.commit();
-        batch = writeBatch(firestoreDb);
+        batch = firestoreDb.batch();
         count = 0;
       }
     }
@@ -309,10 +296,10 @@ async function syncToFirestore(dbData: any) {
 
     // 3. Delete items in Firestore that are deleted locally
     const [catSnap, plansSnap, usersSnap, chanSnap] = await Promise.all([
-      getDocs(collection(firestoreDb, "categories")),
-      getDocs(collection(firestoreDb, "subscriptionPlans")),
-      getDocs(collection(firestoreDb, "users")),
-      getDocs(collection(firestoreDb, "channels"))
+      firestoreDb.collection("categories").get(),
+      firestoreDb.collection("subscriptionPlans").get(),
+      firestoreDb.collection("users").get(),
+      firestoreDb.collection("channels").get()
     ]);
     
     const localCatIds = new Set(dbData.categories.map((c: any) => c.id));
@@ -322,21 +309,21 @@ async function syncToFirestore(dbData: any) {
     
     for (const docSnap of catSnap.docs) {
       if (!localCatIds.has(docSnap.id)) {
-        await deleteDoc(docSnap.ref);
+        await docSnap.ref.delete();
       }
     }
     for (const docSnap of plansSnap.docs) {
       if (!localPlanIds.has(docSnap.id)) {
-        await deleteDoc(docSnap.ref);
+        await docSnap.ref.delete();
       }
     }
     for (const docSnap of usersSnap.docs) {
       if (!localUserIds.has(docSnap.id)) {
-        await deleteDoc(docSnap.ref);
+        await docSnap.ref.delete();
       }
     }
     
-    let deleteBatch = writeBatch(firestoreDb);
+    let deleteBatch = firestoreDb.batch();
     let delCount = 0;
     for (const docSnap of chanSnap.docs) {
       if (!localChanIds.has(docSnap.id)) {
@@ -344,7 +331,7 @@ async function syncToFirestore(dbData: any) {
         delCount++;
         if (delCount === 500) {
           await deleteBatch.commit();
-          deleteBatch = writeBatch(firestoreDb);
+          deleteBatch = firestoreDb.batch();
           delCount = 0;
         }
       }
@@ -372,59 +359,67 @@ function setupFirestoreListeners() {
   console.log("[FIREBASE] Registering real-time Firestore synchronization loops...");
   
   // 1. Categories Observer
-  onSnapshot(collection(firestoreDb, "categories"), (snapshot) => {
+  firestoreDb.collection("categories").onSnapshot((snapshot: any) => {
     if (isFirebaseSyncingFromFirestore) return;
     const db = loadDB();
     const categories: Category[] = [];
-    snapshot.forEach(docSnap => {
+    snapshot.forEach((docSnap: any) => {
       categories.push(docSnap.data() as Category);
     });
     if (categories.length > 0) {
       db.categories = categories;
       saveDBLocalOnly(db);
     }
+  }, (err: any) => {
+    console.error("[FIREBASE LISTEN ERROR] Categories listener failed:", err);
   });
 
   // 2. Channels Observer
-  onSnapshot(collection(firestoreDb, "channels"), (snapshot) => {
+  firestoreDb.collection("channels").onSnapshot((snapshot: any) => {
     if (isFirebaseSyncingFromFirestore) return;
     const db = loadDB();
     const channels: Channel[] = [];
-    snapshot.forEach(docSnap => {
+    snapshot.forEach((docSnap: any) => {
       channels.push(docSnap.data() as Channel);
     });
     if (channels.length > 0) {
       db.channels = channels;
       saveDBLocalOnly(db);
     }
+  }, (err: any) => {
+    console.error("[FIREBASE LISTEN ERROR] Channels listener failed:", err);
   });
 
   // 3. SubscriptionPlans Observer
-  onSnapshot(collection(firestoreDb, "subscriptionPlans"), (snapshot) => {
+  firestoreDb.collection("subscriptionPlans").onSnapshot((snapshot: any) => {
     if (isFirebaseSyncingFromFirestore) return;
     const db = loadDB();
     const subscriptionPlans: SubscriptionPlan[] = [];
-    snapshot.forEach(docSnap => {
+    snapshot.forEach((docSnap: any) => {
       subscriptionPlans.push(docSnap.data() as SubscriptionPlan);
     });
     if (subscriptionPlans.length > 0) {
       db.subscriptionPlans = subscriptionPlans;
       saveDBLocalOnly(db);
     }
+  }, (err: any) => {
+    console.error("[FIREBASE LISTEN ERROR] Plans listener failed:", err);
   });
 
   // 4. Users Observer
-  onSnapshot(collection(firestoreDb, "users"), (snapshot) => {
+  firestoreDb.collection("users").onSnapshot((snapshot: any) => {
     if (isFirebaseSyncingFromFirestore) return;
     const db = loadDB();
     const users: User[] = [];
-    snapshot.forEach(docSnap => {
+    snapshot.forEach((docSnap: any) => {
       users.push(docSnap.data() as User);
     });
     if (users.length > 0) {
       db.users = users;
       saveDBLocalOnly(db);
     }
+  }, (err: any) => {
+    console.error("[FIREBASE LISTEN ERROR] Users listener failed:", err);
   });
 }
 
@@ -438,26 +433,26 @@ async function bootSyncFirebase() {
   try {
     console.log("[FIREBASE] Querying initial Cloud Database feeds...");
     const [catSnap, plansSnap, usersSnap, chanSnap] = await Promise.all([
-      getDocs(collection(firestoreDb, "categories")),
-      getDocs(collection(firestoreDb, "subscriptionPlans")),
-      getDocs(collection(firestoreDb, "users")),
-      getDocs(collection(firestoreDb, "channels"))
+      firestoreDb.collection("categories").get(),
+      firestoreDb.collection("subscriptionPlans").get(),
+      firestoreDb.collection("users").get(),
+      firestoreDb.collection("channels").get()
     ]);
     
     const db = loadDB();
     let hasCloudData = false;
     
     const cloudCategories: Category[] = [];
-    catSnap.forEach(d => { cloudCategories.push(d.data() as Category); });
+    catSnap.forEach((d: any) => { cloudCategories.push(d.data() as Category); });
     
     const cloudPlans: SubscriptionPlan[] = [];
-    plansSnap.forEach(d => { cloudPlans.push(d.data() as SubscriptionPlan); });
+    plansSnap.forEach((d: any) => { cloudPlans.push(d.data() as SubscriptionPlan); });
     
     const cloudUsers: User[] = [];
-    usersSnap.forEach(d => { cloudUsers.push(d.data() as User); });
+    usersSnap.forEach((d: any) => { cloudUsers.push(d.data() as User); });
     
     const cloudChannels: Channel[] = [];
-    chanSnap.forEach(d => { cloudChannels.push(d.data() as Channel); });
+    chanSnap.forEach((d: any) => { cloudChannels.push(d.data() as Channel); });
 
     if (cloudCategories.length > 0 || cloudChannels.length > 0) {
       hasCloudData = true;

@@ -1,0 +1,67 @@
+{
+  "entities": {
+    "Category": {
+      "title": "Category",
+      "description": "Channel categories",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "slug": { "type": "string" }
+      },
+      "required": ["id", "name", "slug"]
+    },
+    "SubscriptionPlan": {
+      "title": "SubscriptionPlan",
+      "description": "Subscription plans for users",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "price": { "type": "number" }
+      },
+      "required": ["id", "name", "price"]
+    },
+    "User": {
+      "title": "User",
+      "description": "User accounts",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "username": { "type": "string" },
+        "role": { "type": "string" }
+      },
+      "required": ["id", "username", "role"]
+    },
+    "Channel": {
+      "title": "Channel",
+      "description": "Streaming channels",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "url": { "type": "string" },
+        "category": { "type": "string" }
+      },
+      "required": ["id", "name", "url", "category"]
+    }
+  },
+  "firestore": {
+    "categories": {
+      "schema": "Category",
+      "description": "List of categories"
+    },
+    "subscriptionPlans": {
+      "schema": "SubscriptionPlan",
+      "description": "All available subscription plans"
+    },
+    "users": {
+      "schema": "User",
+      "description": "Registered and configured users"
+    },
+    "channels": {
+      "schema": "Channel",
+      "description": "All streaming channels"
+    }
+  }
+}
