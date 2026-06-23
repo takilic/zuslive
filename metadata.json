@@ -1,0 +1,6 @@
+{
+  "name": "IPTV Streamer UI & Admin Panel",
+  "description": "A premium modern IPTV streaming portal with a Live HLS player, categorized TV grids, search, user management, and a complete, real-time backend dashboard for channel and subscription control.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
