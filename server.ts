@@ -9,6 +9,27 @@ const PORT = 3000;
 
 app.use(express.json());
 
+// Auto-restrict all non-GET /api database write operations to AI Studio sandboxes only
+app.use("/api", (req, res, next) => {
+  if (req.method !== "GET" && req.path !== "/channels/fetch-remote-m3u" && req.path !== "/stream-proxy") {
+    // If the request is a write operation (POST, PUT, DELETE) and not a public stream-relay segment
+    const referer = req.get("referer") || "";
+    const host = req.get("host") || "";
+    const isLocalOrDev = host.includes("localhost") || 
+                         host.includes("127.0.0.1") || 
+                         host.includes("ais-dev-") || 
+                         referer.includes("localhost") || 
+                         referer.includes("ais-dev-");
+
+    if (!isLocalOrDev) {
+      return res.status(403).json({
+        error: "IPTV Admin Panel is in read-only mode for public view. Adding, importing, or editing channels can only be performed via the AI Studio workspace."
+      });
+    }
+  }
+  next();
+});
+
 // Persistent database file setup
 const DB_DIR = path.join(process.cwd(), "data");
 const DB_FILE = path.join(DB_DIR, "db.json");

@@ -5,11 +5,12 @@ import './index.css';
 
 // Gracefully intercept and suppress cross-origin script errors and benign third-party iframe errors
 if (typeof window !== 'undefined') {
-  const handleBenignError = (message: string, errorObj?: any) => {
-    const isScriptError = message === 'Script error.' || message.toLowerCase().includes('script error');
-    const isCrossOrigin = message.toLowerCase().includes('cross-origin') || message.toLowerCase().includes('crossorigin') || message.toLowerCase().includes('cors');
-    const isHlsException = message.toLowerCase().includes('hls') || (errorObj && String(errorObj).toLowerCase().includes('hls'));
-    const isExtensionError = message.toLowerCase().includes('extension') || (errorObj && String(errorObj).toLowerCase().includes('chrome-extension'));
+  const handleBenignError = (message: any, errorObj?: any) => {
+    const msg = String(message || '').toLowerCase();
+    const isScriptError = msg === 'script error.' || msg.includes('script error');
+    const isCrossOrigin = msg.includes('cross-origin') || msg.includes('crossorigin') || msg.includes('cors');
+    const isHlsException = msg.includes('hls') || (errorObj && String(errorObj).toLowerCase().includes('hls'));
+    const isExtensionError = msg.includes('extension') || msg.includes('chrome-extension');
     
     return isScriptError || isCrossOrigin || isHlsException || isExtensionError;
   };

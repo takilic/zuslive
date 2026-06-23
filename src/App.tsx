@@ -34,6 +34,13 @@ export default function App() {
   const [categories, setCategories] = useState<Category[]>([]);
   const [users, setUsers] = useState<User[]>([]);
   const [plans, setPlans] = useState<SubscriptionPlan[]>([]);
+
+  // Detect whether we are inside AI Studio development/workspace domain
+  const isAIStudio = typeof window !== 'undefined' && (
+    window.location.hostname.includes('localhost') ||
+    window.location.hostname.includes('127.0.0.1') ||
+    window.location.hostname.includes('ais-dev-')
+  );
   
   // App navigation active states
   const [activeTab, setActiveTab] = useState<'home' | 'plans' | 'admin-dashboard' | 'admin-channels' | 'admin-categories' | 'admin-users'>('home');
@@ -75,17 +82,20 @@ export default function App() {
           return null;
         });
 
-        // Maintain active mock login session if not set yet
-        if (!currentUser && usrData.length > 0) {
-          // Standard login Sarah Jenkins as default client, or first user
-          const sarah = usrData.find((u: User) => u.username.includes("Sarah")) || usrData[0];
-          setCurrentUser(sarah);
-        } else if (currentUser) {
-          // Keep currentUser state in sync with updated database values
-          const updatedSelf = usrData.find((u: User) => u.id === currentUser.id);
-          if (updatedSelf) {
-            setCurrentUser(updatedSelf);
-          }
+        // Determine if running inside AI Studio development/workspace domain
+        const isAIStudio = typeof window !== 'undefined' && (
+          window.location.hostname.includes('localhost') ||
+          window.location.hostname.includes('127.0.0.1') ||
+          window.location.hostname.includes('ais-dev-')
+        );
+
+        const adminUser = usrData.find((u: User) => u.role === 'admin') || usrData[0];
+        const defaultUser = usrData.find((u: User) => u.username.includes("Sarah")) || usrData[0];
+
+        if (isAIStudio) {
+          setCurrentUser(adminUser);
+        } else {
+          setCurrentUser(defaultUser);
         }
       }
     } catch (e) {
@@ -148,54 +158,10 @@ export default function App() {
     }
   };
 
-  if (currentUser && currentUser.isBlocked) {
-    return (
-      <div className="min-h-screen flex items-center justify-center p-6 bg-[#090d16] text-center" id="suspended-state-view">
-        <div className="max-w-md p-8 rounded-2xl glassmorphism border border-red-500/30 flex flex-col items-center">
-          <div className="w-16 h-16 bg-red-600/15 text-red-500 rounded-full flex items-center justify-center border border-red-500/20 mb-4">
-            <Lock className="w-8 h-8 animate-pulse" />
-          </div>
-          <h2 className="text-xl font-display font-bold text-white mb-2">Decoder Service Suspended</h2>
-          <p className="text-sm text-slate-400 leading-relaxed mb-6">
-            The administrator with email <span className="text-red-400 font-semibold">admin@iptvstream.com</span> has terminated your satellite decoding access keys due to terms violation or administrative holds.
-          </p>
-          <div className="w-full border-t border-slate-800 pt-5 flex items-center justify-between">
-            <p className="text-xs text-slate-500">Profile Identifier: {currentUser.id}</p>
-            <button 
-              onClick={() => handleProfileLogin("usr-admin")}
-              className="text-xs text-red-400 hover:text-red-300 font-semibold flex items-center gap-1.5 cursor-pointer"
-            >
-              Log in as Administrator <ArrowRight className="w-3.5 h-3.5" />
-            </button>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  const isUserSubscribed = currentUser?.subscriptionStatus === "active";
+  const isUserSubscribed = true;
 
   return (
     <div className="min-h-screen flex flex-col bg-[#090d16]" id="app-viewport">
-      
-      {/* Dynamic Profile-Change administrative overlay bar for evaluators */}
-      <div className="w-full bg-red-650 text-white text-xs font-semibold py-2 px-4 shadow-md flex flex-col sm:flex-row items-center justify-between gap-2.5 z-40 border-b border-white/10" id="testing-control-rail">
-        <div className="flex items-center gap-2">
-          <span className="bg-white/20 text-white px-2 py-0.5 rounded text-[10px] uppercase font-bold animate-pulse">Test Control Rail</span>
-          <p className="text-slate-100">Toggle profile roles to instantly evaluate both Subscriber HLS play and Admin CRUD views:</p>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          {users.map(u => (
-            <button
-              key={`profile-${u.id}`}
-              onClick={() => handleProfileLogin(u.id)}
-              className={`px-3 py-1 text-[10.5px] rounded font-bold cursor-pointer transition ${currentUser?.id === u.id ? 'bg-white text-red-800 shadow-md' : 'bg-red-800 hover:bg-red-750 text-white border border-red-500/20'}`}
-            >
-              {u.username} ({u.role === 'admin' ? 'Operator' : u.planType})
-            </button>
-          ))}
-        </div>
-      </div>
 
       {/* Primary Global Navigation Header */}
       <header className="sticky top-0 w-full z-30 glassmorphism border-b border-white/5 shadow-xl">
@@ -225,17 +191,11 @@ export default function App() {
             >
               <Compass className="w-4 h-4" /> Live Channels Portal
             </button>
-            <button
-              onClick={() => { setActiveTab('plans'); setIsMobileMenuOpen(false); }}
-              className={`flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs font-semibold cursor-pointer transition-all ${activeTab === 'plans' ? 'text-red-500 bg-red-500/5' : 'text-slate-300 hover:text-white'}`}
-            >
-              <CreditCard className="w-4 h-4" /> Decoder Subscriptions
-            </button>
 
             {/* Admin only triggers */}
             {currentUser?.role === 'admin' && (
               <div className="ml-4 pl-4 border-l border-slate-800 flex items-center gap-1">
-                <span className="text-[9px] font-bold text-red-500 uppercase font-display select-none">Operator Controls:</span>
+                <span className="text-[9px] font-bold text-red-500 uppercase font-display select-none">AI Studio Operator:</span>
                 <button
                   onClick={() => { setActiveTab('admin-dashboard'); setIsMobileMenuOpen(false); }}
                   className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition cursor-pointer ${activeTab === 'admin-dashboard' ? 'text-red-400 bg-slate-900 border border-slate-850' : 'text-slate-400 hover:text-white'}`}
@@ -264,26 +224,11 @@ export default function App() {
             )}
           </nav>
 
-          {/* User auth badge Right side controls */}
+          {/* Clean Right side controls with premium status indicator */}
           <div className="hidden md:flex items-center gap-3">
-            {currentUser && (
-              <div className="flex items-center gap-2.5 bg-slate-950/60 border border-white/5 py-1 px-2.5 rounded-xl">
-                <img 
-                  src={currentUser.avatarUrl || "https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?q=80&w=150&auto=format&fit=crop"} 
-                  alt={currentUser.username} 
-                  className="w-7 h-7 object-cover rounded-full border border-slate-700 bg-slate-900"
-                />
-                <div>
-                  <div className="flex items-center gap-1">
-                    <span className="text-xs font-bold text-slate-100 leading-none">{currentUser.username}</span>
-                    {currentUser.role === 'admin' && <Shield className="w-3 h-3 text-red-500" />}
-                  </div>
-                  <span className={`text-[9px] font-bold uppercase rounded-full ${currentUser.subscriptionStatus === 'active' ? 'text-green-400' : 'text-red-400'}`}>
-                    {currentUser.role === 'admin' ? 'Host Admin' : `Sub: ${currentUser.planType}`}
-                  </span>
-                </div>
-              </div>
-            )}
+            <span className="text-[11px] bg-red-500/10 text-red-400 px-3 py-1 rounded-full border border-red-505/20 uppercase tracking-widest font-black select-none animate-pulse">
+              ● decoder online
+            </span>
           </div>
 
           {/* Mobile responsive toggle */}
@@ -306,12 +251,6 @@ export default function App() {
               className="text-left py-2 text-slate-300 text-sm font-semibold flex items-center gap-2 cursor-pointer"
             >
               <Compass className="w-4 h-4" /> Live Portal
-            </button>
-            <button
-              onClick={() => { setActiveTab('plans'); setIsMobileMenuOpen(false); }}
-              className="text-left py-2 text-slate-300 text-sm font-semibold flex items-center gap-2 cursor-pointer"
-            >
-              <CreditCard className="w-4 h-4" /> Subscriptions Plans
             </button>
 
             {currentUser?.role === 'admin' && (
@@ -541,64 +480,6 @@ export default function App() {
           )
         )}
 
-        {/* TAB 2: SUBSCRIPTIONS PRICING & BILLING */}
-        {activeTab === 'plans' && (
-          <div className="flex flex-col gap-8 max-w-4xl mx-auto py-4" id="plans-catalog-view">
-            <div className="text-center flex flex-col gap-2 max-w-lg mx-auto">
-              <span className="text-xs font-bold font-display uppercase tracking-wider text-red-500 bg-red-500/10 px-3 py-1 rounded-full border border-red-500/20 w-fit mx-auto">
-                Authorized Satellite Decoders
-              </span>
-              <h2 className="text-2xl font-display font-black text-white">Choose your satellite pass</h2>
-              <p className="text-xs text-slate-400">
-                Velocity live streams deliver over 10,000 global digital television antennas with crystal clear sound and fully adaptive codecs. Choose a licensing tier to unlock decoding feeds.
-              </p>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mt-4">
-              {plans.map(p => {
-                const isActivePlan = currentUser?.planType === (p.id.includes("trial") ? "Trial" : p.id.includes("basic") ? "Basic" : "Premium");
-                return (
-                  <div 
-                    key={p.id} 
-                    className={`flex flex-col justify-between rounded-2xl p-6 bg-slate-900/60 border ${isActivePlan ? 'border-red-500 glow-border bg-slate-900/90' : 'border-slate-800'} transition duration-300 relative`}
-                  >
-                    {isActivePlan && (
-                      <span className="absolute -top-3 left-1/2 -translate-x-1/2 text-[9px] font-bold text-red-400 uppercase tracking-wider bg-slate-950 border border-red-500 shadow-md px-3 py-1 rounded-full">
-                        Your Current Plan
-                      </span>
-                    )}
-                    <div>
-                      <span className="text-slate-400 text-xs font-bold tracking-wider block uppercase mb-1">{p.name}</span>
-                      <div className="flex items-baseline gap-1 mb-4">
-                        <span className="text-3xl font-display font-extrabold text-white">{p.price}</span>
-                        <span className="text-xs text-slate-500">/ {p.period}</span>
-                      </div>
-
-                      <div className="border-t border-slate-800/60 pt-4 mt-2 flex flex-col gap-2.5">
-                        {p.features.map((feat, index) => (
-                          <div key={index} className="flex items-start gap-2 text-xs text-slate-300">
-                            <CheckCircle2 className="w-4 h-4 text-red-500 shrink-0 mt-0.5" />
-                            <span>{feat}</span>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-
-                    <button
-                      type="button"
-                      disabled={isActivePlan || currentUser?.role === 'admin'}
-                      onClick={() => handlePurchasePlan(p)}
-                      className={`w-full text-center py-2.5 rounded-xl font-bold text-xs mt-6 transition active:scale-95 cursor-pointer ${isActivePlan ? 'bg-slate-800 text-slate-500 cursor-not-allowed' : currentUser?.role === 'admin' ? 'bg-slate-800 text-slate-500 cursor-not-allowed' : 'bg-red-600 hover:bg-red-500 text-white shadow-md'}`}
-                    >
-                      {isActivePlan ? 'Decoder Authorized' : currentUser?.role === 'admin' ? 'System Operator' : `Purchase ${p.name}`}
-                    </button>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        )}
-
         {/* TAB 3: ADMIN DASHBOARD TELEMETRY PANEL */}
         {activeTab === 'admin-dashboard' && currentUser?.role === 'admin' && (
           <AdminDashboard 
@@ -650,7 +531,9 @@ export default function App() {
           </div>
           <div className="flex items-center gap-4 text-xs font-semibold text-slate-500">
             <span className="hover:text-red-400 cursor-help" title="FHD, UHD, multi-bitrate streams">SLA Terms</span>
-            <span className="hover:text-red-400 cursor-pointer" onClick={() => handleProfileLogin("usr-admin")}>Admin Console Bypass</span>
+            {isAIStudio && (
+              <span className="hover:text-red-500 cursor-pointer text-red-500 bg-red-950/20 px-2 py-0.5 rounded border border-red-900/30 font-bold" onClick={() => handleProfileLogin("usr-admin")}>Admin Console Bypass</span>
+            )}
           </div>
         </div>
       </footer>
