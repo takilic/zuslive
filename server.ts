@@ -215,6 +215,18 @@ function saveDB(data: any) {
 
 // ================= API ENDPOINTS =================
 
+// Export raw database file
+app.get("/api/admin/db/raw", (req, res) => {
+  try {
+    const rawData = fs.readFileSync(DB_FILE, "utf-8");
+    res.setHeader("Content-Type", "application/json");
+    res.setHeader("Content-Disposition", "attachment; filename=db.json");
+    res.send(rawData);
+  } catch (err) {
+    res.status(500).json({ error: "Failed to read database file" });
+  }
+});
+
 // Channels API
 app.get("/api/channels", (req, res) => {
   const db = loadDB();

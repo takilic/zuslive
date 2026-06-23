@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Tv, Activity, Users, ShieldAlert, DollarSign, Award, ThumbsUp, Radio, Database, Server, RefreshCw, UploadCloud, Check, AlertCircle, FileText } from 'lucide-react';
+import { Tv, Activity, Users, ShieldAlert, DollarSign, Award, ThumbsUp, Radio, Database, Server, RefreshCw, UploadCloud, Check, AlertCircle, FileText, Download } from 'lucide-react';
 import { Analytics, Channel, Category } from '../types.ts';
 
 interface AdminDashboardProps {
@@ -469,6 +469,40 @@ export default function AdminDashboard({ channels, categories, onRefreshAllData 
             </div>
           </div>
         )}
+      </div>
+
+      {/* Persistence Guide & Database Sync utility */}
+      <div className="bg-gradient-to-br from-slate-900 to-slate-950 p-6 rounded-2xl border border-blue-500/15 flex flex-col md:flex-row md:items-center justify-between gap-5 shadow-2xl" id="database-persistence-guide">
+        <div className="flex flex-col gap-2 max-w-3xl">
+          <h4 className="font-display font-semibold text-sm text-blue-400 flex items-center gap-2">
+            <Database className="w-5 h-5 text-blue-400" />
+            কিভাবে আপলোড করা চ্যানেলগুলো সবার জন্য স্থায়ী (Permanent) করবেন?
+          </h4>
+          <p className="text-xs text-slate-350 leading-relaxed">
+            আপনি যখন এডমিন প্যানেল থেকে কোনো M3U ফাইল আপলোড করেন, তা কন্টেইনারের সাময়িক মেমোরিতে (<code className="bg-slate-900 px-1 py-0.5 rounded text-amber-400 font-mono text-[10px]">db.json</code>) জমা হয়। যেহেতু অ্যাপের সার্ভার ও কন্টেইনার মাঝে মাঝে অটো রিস্টার্ট হয় বা নতুন ভিজিটররা আলাদা কন্টেইনারে ঢোকেন, তাই আপলোড করা নতুন চ্যানেলগুলোকে স্থায়ী করতে নিচের পদ্ধতিটি ব্যবহার করুন:
+          </p>
+          <div className="flex flex-col gap-1.5 mt-1">
+            <p className="text-xs text-slate-400 flex items-start gap-1.5">
+              <span className="text-blue-500 font-bold font-mono">১.</span> 
+              <span>নিচের <strong>ডাউনলোড কনফিগারেশন</strong> বাটনে ক্লিক করে আপডেটেড <code className="text-blue-400 font-mono text-[10px]">db.json</code> ফাইলটি ডাউনলোড করে নিন।</span>
+            </p>
+            <p className="text-xs text-slate-400 flex items-start gap-1.5">
+              <span className="text-blue-500 font-bold font-mono">২.</span> 
+              <span>এরপর বাম পাশের ফাইল ম্যানেজার থেকে <code className="text-amber-400 font-mono text-[10px]">/data/db.json</code> ফাইলের উপর মাউস রেখে রাইট ক্লিক করে আপলোড বা ওভাররাইট (Overwrite) করে দিন!</span>
+            </p>
+          </div>
+        </div>
+
+        <button
+          type="button"
+          onClick={() => {
+            window.open('/api/admin/db/raw');
+          }}
+          className="flex items-center justify-center gap-2 px-5 py-3 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white text-xs font-bold rounded-xl transition duration-200 shadow-lg shadow-blue-500/10 active:scale-95 cursor-pointer md:self-center self-start shrink-0"
+        >
+          <Download className="w-4 h-4" />
+          ডাউনলোড কনফিগারেশন (db.json)
+        </button>
       </div>
 
       {/* Main Grid Metrics cards */}
