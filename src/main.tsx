@@ -7,11 +7,21 @@ import './index.css';
 if (typeof window !== 'undefined') {
   const handleBenignError = (message: string, errorObj?: any) => {
     const isScriptError = message === 'Script error.' || message.toLowerCase().includes('script error');
-    const isCrossOrigin = message.toLowerCase().includes('cross-origin') || message.toLowerCase().includes('crossorigin');
+    const isCrossOrigin = message.toLowerCase().includes('cross-origin') || message.toLowerCase().includes('crossorigin') || message.toLowerCase().includes('cors');
     const isHlsException = message.toLowerCase().includes('hls') || (errorObj && String(errorObj).toLowerCase().includes('hls'));
     const isExtensionError = message.toLowerCase().includes('extension') || (errorObj && String(errorObj).toLowerCase().includes('chrome-extension'));
     
     return isScriptError || isCrossOrigin || isHlsException || isExtensionError;
+  };
+
+  // Set legacy window.onerror for strict suppression before event bubble
+  window.onerror = function(message, source, lineno, colno, error) {
+    const msg = String(message || '');
+    if (handleBenignError(msg, error)) {
+      console.warn('Bypassed global window.onerror script error:', msg);
+      return true; // suppresses error alerts and bubbling
+    }
+    return false;
   };
 
   window.addEventListener('error', (event) => {
