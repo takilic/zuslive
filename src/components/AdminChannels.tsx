@@ -30,6 +30,8 @@ export default function AdminChannels({ channels, categories, onChannelsUpdated,
   const [isImportingM3U, setIsImportingM3U] = useState(false);
   const [m3uFileText, setM3uFileText] = useState("");
   const [m3uFileName, setM3uFileName] = useState("");
+  const [remoteUrl, setRemoteUrl] = useState("");
+  const [m3uUrlLoading, setM3uUrlLoading] = useState(false);
   const [dragActive, setDragActive] = useState(false);
   const [m3uCategoryMode, setM3uCategoryMode] = useState<"m3u" | "force">("m3u");
   const [m3uForceCategoryId, setM3uForceCategoryId] = useState("");
@@ -194,6 +196,53 @@ export default function AdminChannels({ channels, categories, onChannelsUpdated,
       setErrorMsg("Severe file parsing failure.");
     };
     reader.readAsText(file);
+  };
+
+  const processM3URemoteURL = async (url: string) => {
+    if (!url) {
+      setErrorMsg("Please enter a valid remote Playlist URL.");
+      return;
+    }
+
+    setM3uUrlLoading(true);
+    setErrorMsg("");
+    setSuccessMsg("");
+    setM3uFileName("Downloading remote playlist...");
+
+    try {
+      const res = await fetch("/api/channels/fetch-remote-m3u", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ playlistUrl: url })
+      });
+
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        throw new Error(errorData.error || `Remote server responded with error code: ${res.status}`);
+      }
+
+      const remoteData = await res.json();
+      const content = remoteData.content;
+      
+      setM3uFileText(content);
+      const parsed = parseM3UPlaylist(content);
+
+      if (parsed.length === 0) {
+        setErrorMsg("The remote location did not return a valid list of streaming channels.");
+        setParsedChannels([]);
+      } else {
+        setParsedChannels(parsed.map(ch => ({ ...ch, selected: true })));
+        setSuccessMsg(`Successfully loaded and parsed ${parsed.length} channels from external playlist link!`);
+        setM3uFileName(url.substring(url.lastIndexOf("/") + 1) || "Remote Playlist Feed");
+        setRemoteUrl(""); // reset URL text field
+      }
+    } catch (err: any) {
+      setErrorMsg(err.message || "Failed to download remote playlist. Check link live state or CORS availability.");
+      setParsedChannels([]);
+      setM3uFileName("");
+    } finally {
+      setM3uUrlLoading(false);
+    }
   };
 
   const executeBatchImport = async () => {
@@ -446,28 +495,66 @@ export default function AdminChannels({ channels, categories, onChannelsUpdated,
           </div>
 
           {parsedChannels.length === 0 ? (
-            <div 
-              onDragEnter={handleDrag}
-              onDragOver={handleDrag}
-              onDragLeave={handleDrag}
-              onDrop={handleDrop}
-              className={`border-2 border-dashed rounded-2xl p-8 flex flex-col items-center justify-center text-center transition ${
-                dragActive ? "border-amber-500 bg-amber-500/5" : "border-slate-800 bg-slate-950/40 hover:border-slate-750"
-              }`}
-            >
-              <FileText className="w-12 h-12 text-slate-500 mb-3" />
-              <p className="text-sm font-semibold text-slate-200">Drag and drop your M3U playlist file here</p>
-              <p className="text-xs text-slate-500 mt-1 mb-4">Accepts standard .m3u and .m3u8 playlist streams</p>
-              
-              <label className="cursor-pointer bg-slate-900 border border-slate-800 text-xs text-slate-200 px-4 py-2 rounded-xl font-bold hover:bg-slate-800 transition active:scale-95">
-                Choose Local File
-                <input
-                  type="file"
-                  accept=".m3u,.m3u8,text/plain"
-                  className="hidden"
-                  onChange={handleM3UFileChange}
-                />
-              </label>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+              {/* Box 1: Dropzone */}
+              <div 
+                onDragEnter={handleDrag}
+                onDragOver={handleDrag}
+                onDragLeave={handleDrag}
+                onDrop={handleDrop}
+                className={`border-2 border-dashed rounded-2xl p-6 flex flex-col items-center justify-center text-center transition ${
+                  dragActive ? "border-amber-500 bg-amber-500/5" : "border-slate-800 bg-slate-950/40 hover:border-slate-750"
+                }`}
+              >
+                <FileText className="w-10 h-10 text-slate-555 mb-2" />
+                <p className="text-xs font-semibold text-slate-200">Drag & drop playlist file here</p>
+                <p className="text-[10px] text-slate-550 mt-0.5 mb-3">Accepts standard .m3u and .m3u8 files</p>
+                
+                <label className="cursor-pointer bg-slate-900 border border-slate-800 text-[11px] text-slate-200 px-3.5 py-1.5 rounded-xl font-bold hover:bg-slate-800 transition active:scale-95">
+                  Choose Local File
+                  <input
+                    type="file"
+                    accept=".m3u,.m3u8,text/plain"
+                    className="hidden"
+                    onChange={handleM3UFileChange}
+                  />
+                </label>
+              </div>
+
+              {/* Box 2: Remote URL Link */}
+              <div className="bg-slate-950/45 border border-slate-850 rounded-2xl p-6 flex flex-col justify-between">
+                <div>
+                  <span className="text-xs font-bold text-amber-500 flex items-center gap-1 select-none">
+                    🔗 Load from Vercel / Remote Link URL
+                  </span>
+                  <p className="text-[11px] text-slate-450 mt-1 leading-relaxed">
+                    Connect your applet directly to external playlist servers (like Vercel JSON configs or remote M3U listings).
+                  </p>
+                </div>
+
+                <div className="flex flex-col gap-2 mt-4">
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      value={remoteUrl}
+                      onChange={(e) => setRemoteUrl(e.target.value)}
+                      placeholder="https://example-iptv.vercel.app/playlist.m3u"
+                      className="flex-1 bg-slate-950 border border-slate-800 rounded-xl px-3 py-1 text-xs text-white placeholder-slate-600 focus:outline-none focus:border-amber-500 transition"
+                    />
+                    <button
+                      type="button"
+                      disabled={!remoteUrl || m3uUrlLoading}
+                      onClick={() => processM3URemoteURL(remoteUrl)}
+                      className="bg-amber-600 hover:bg-amber-500 disabled:opacity-30 text-white text-xs font-bold px-4 py-2 rounded-xl transition cursor-pointer min-w-[100px] flex items-center justify-center"
+                    >
+                      {m3uUrlLoading ? "Fetching..." : "Fetch Link"}
+                    </button>
+                  </div>
+                  <span className="text-[10px] text-slate-500">
+                    Bypasses all client-side CORS blockers via server-side secure URL fetching proxy.
+                  </span>
+                </div>
+              </div>
             </div>
           ) : (
             <div className="flex flex-col gap-4">

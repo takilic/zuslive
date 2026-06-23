@@ -393,6 +393,88 @@ app.post("/api/channels/import-m3u", (req, res) => {
   res.status(201).json({ success: true, count: addedChannels.length, channels: addedChannels });
 });
 
+// Server-side Remote M3U Playlist Fetcher & Parser
+app.post("/api/channels/fetch-remote-m3u", async (req, res) => {
+  const { playlistUrl } = req.body;
+  if (!playlistUrl) {
+    return res.status(400).json({ error: "Please enter a valid remote Playlist URL endpoint." });
+  }
+
+  try {
+    const urlPattern = /^(https?:\/\/)/i;
+    const finalUrl = urlPattern.test(playlistUrl) ? playlistUrl : `http://${playlistUrl}`;
+    
+    console.log(`[PROXY] Fetching remote playlist from: ${finalUrl}`);
+    const response = await fetch(finalUrl, {
+      method: "GET",
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) IPTVStreamDecoder/2.4"
+      }
+    });
+
+    if (!response.ok) {
+      return res.status(response.status).json({
+        error: `Could not retrieve file. Remote server responded with error code: ${response.status} ${response.statusText}`
+      });
+    }
+
+    const m3uText = await response.text();
+    return res.json({
+      success: true,
+      content: m3uText,
+      url: finalUrl
+    });
+  } catch (err: any) {
+    console.error("[PROXY ERROR] Failed to parse remote stream server:", err);
+    return res.status(500).json({
+      error: `Connection failure pointing to ${playlistUrl}. Check link live state or firewall constraints. Context: ${err.message || err}`
+    });
+  }
+});
+
+// Complete CORS Stream-Proxy & Relay Gateway
+app.get("/api/stream-proxy", async (req, res) => {
+  const targetUrl = req.query.url as string;
+  if (!targetUrl) {
+    return res.status(400).send("Parameter 'url' is required inside CORS gateway relay.");
+  }
+
+  try {
+    const response = await fetch(targetUrl, {
+      method: "GET",
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) IPTVStreamPlayer/1.1"
+      }
+    });
+
+    // Write back response headers with absolute CORS compliance
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    res.setHeader("Access-Control-Allow-Methods", "GET, HEAD, OPTIONS");
+    res.setHeader("Access-Control-Allow-Headers", "*");
+
+    const type = response.headers.get("content-type");
+    if (type) {
+      res.setHeader("Content-Type", type);
+    }
+
+    // Set cache control for streaming chunks
+    res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+
+    if (response.body) {
+      // In Node 18, we can convert Web ReadableStream to arrayBuffer for compatibility,
+      // or directly read chunk by chunk to prevent buffering latency.
+      const buffer = await response.arrayBuffer();
+      return res.send(Buffer.from(buffer));
+    } else {
+      const text = await response.text();
+      return res.send(text);
+    }
+  } catch (err: any) {
+    console.error("[STREAM PROXY EXCEPTION]:", err);
+    return res.status(502).send(`IPTV Satellite Connection Refused or link dead. Code: ${err.message}`);
+  }
+});
+
 app.put("/api/channels/:id", (req, res) => {
   const db = loadDB();
   const index = db.channels.findIndex((c: any) => c.id === req.params.id);

@@ -21,6 +21,7 @@ export default function AdminDashboard({ channels, categories, onRefreshAllData 
   const [isImporting, setIsImporting] = useState(true); // Default to open for intuitive UX
   const [dragActive, setDragActive] = useState(false);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [remoteUrl, setRemoteUrl] = useState("");
   const [categoryMode, setCategoryMode] = useState<"m3u" | "force">("m3u");
   const [forceCategoryId, setForceCategoryId] = useState("");
   const [defaultStatus, setDefaultStatus] = useState<"online" | "offline">("online");
@@ -119,6 +120,65 @@ export default function AdminDashboard({ channels, categories, onRefreshAllData 
     };
 
     reader.readAsText(selectedFile);
+  };
+
+  const handleRemoteFetchAndImport = async () => {
+    if (!remoteUrl) {
+      setImportError("Please enter a valid remote M3U/M3U8 URL (e.g. from Vercel).");
+      return;
+    }
+    
+    setImportLoading(true);
+    setImportError("");
+    setImportSuccess("");
+
+    try {
+      // 1. Fetch Remote M3U URL content via our server-side secure client proxy (bypasses CORS completely!)
+      const res = await fetch("/api/channels/fetch-remote-m3u", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ playlistUrl: remoteUrl })
+      });
+
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        throw new Error(errorData.error || `Remote server responded with error status: ${res.status}`);
+      }
+
+      const remoteData = await res.json();
+      const content = remoteData.content;
+
+      // 2. Import parsed M3U content directly
+      const importResponse = await fetch("/api/channels/import-m3u", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          m3uContent: content,
+          categoryMode,
+          forceCategoryId: forceCategoryId || undefined,
+          defaultStatus,
+          autoFeature
+        })
+      });
+
+      const data = await importResponse.json();
+      
+      if (importResponse.ok && data.success) {
+        setImportSuccess(`Successfully fetched and imported ${data.count} live channels from remote URL!`);
+        setRemoteUrl("");
+        onRefreshAllData(); // Refresh the applet metrics and lists
+        setSimulationLogs(logs => [
+          `[SYSTEM] Remote playlist loaded and imported from external host. Parsed ${data.count} satellite feeds.`,
+          ...logs.slice(0, 4)
+        ]);
+      } else {
+        setImportError(data.error || "The playlist structure is unrecognized or has no streaming assets.");
+      }
+    } catch (err: any) {
+      setImportError(err.message || "Could not fetch or dispatch playlist package from remote server.");
+    } finally {
+      setImportLoading(false);
+    }
   };
 
   const fetchAnalytics = async () => {
@@ -260,23 +320,23 @@ export default function AdminDashboard({ channels, categories, onRefreshAllData 
 
             <div className="grid grid-cols-1 md:grid-cols-12 gap-5">
               {/* File selection and drop workspace */}
-              <div className="md:col-span-5">
+              <div className="md:col-span-5 flex flex-col gap-3">
                 <div
                   onDragEnter={handleDrag}
                   onDragOver={handleDrag}
                   onDragLeave={handleDrag}
                   onDrop={handleDrop}
                   onClick={() => document.getElementById("dashboard-m3u-file-input")?.click()}
-                  className={`border-2 border-dashed rounded-xl p-6 flex flex-col items-center justify-center text-center transition cursor-pointer h-full min-h-[140px] ${
+                  className={`border-2 border-dashed rounded-xl p-5 flex flex-col items-center justify-center text-center transition cursor-pointer ${
                     dragActive ? "border-amber-500 bg-amber-500/5" : "border-slate-800 bg-slate-950/40 hover:border-slate-750"
                   }`}
                   id="dashboard-dropzone"
                 >
-                  <FileText className="w-9 h-9 text-slate-500 mb-2" />
+                  <FileText className="w-8 h-8 text-slate-500 mb-2" />
                   <p className="text-xs font-semibold text-slate-200">
-                    {selectedFile ? selectedFile.name : "Drag & drop playlist here or click to browse"}
+                    {selectedFile ? selectedFile.name : "Choose local .m3u playlist file"}
                   </p>
-                  <p className="text-[10px] text-slate-550 mt-1">Supports UTF-8 encoded .m3u, .m3u8 or raw .txt streams</p>
+                  <p className="text-[10px] text-slate-550 mt-0.5">Drag and drop file here or click to browse</p>
                   <input
                     id="dashboard-m3u-file-input"
                     type="file"
@@ -284,6 +344,35 @@ export default function AdminDashboard({ channels, categories, onRefreshAllData 
                     className="hidden"
                     onChange={handleFileChange}
                   />
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <div className="h-px bg-slate-800 flex-1"></div>
+                  <span className="text-[9px] text-slate-550 font-bold uppercase tracking-wider">OR REMOTE URL</span>
+                  <div className="h-px bg-slate-800 flex-1"></div>
+                </div>
+
+                <div className="bg-slate-950/40 border border-slate-800/80 rounded-xl p-3 flex flex-col gap-2">
+                  <span className="text-[11px] font-semibold text-amber-500/90 flex items-center gap-1 select-none">
+                    🔗 Connect to Vercel/External Link
+                  </span>
+                  <input
+                    type="text"
+                    value={remoteUrl}
+                    onChange={(e) => {
+                      setRemoteUrl(e.target.value);
+                      if (selectedFile) {
+                        setSelectedFile(null);
+                        const fileInput = document.getElementById("dashboard-m3u-file-input") as HTMLInputElement;
+                        if (fileInput) fileInput.value = "";
+                      }
+                    }}
+                    placeholder="https://your-app.vercel.app/list.m3u"
+                    className="w-full bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1.5 text-xs text-white placeholder-slate-600 focus:outline-none focus:border-amber-500 transition"
+                  />
+                  <p className="text-[9px] text-slate-500 leading-normal">
+                    Enter any external playlist or dynamic server link. Connection is proxied server-side to bypass browse CORS guards.
+                  </p>
                 </div>
               </div>
 
@@ -343,7 +432,7 @@ export default function AdminDashboard({ channels, categories, onRefreshAllData 
               </div>
             </div>
 
-            <div className="flex justify-end gap-2 pr-1 border-t border-slate-800/60 pt-3">
+            <div className="flex justify-end gap-2 pr-1 border-t border-slate-800/60 pt-3 text-xs">
               {selectedFile && (
                 <button
                   type="button"
@@ -353,18 +442,27 @@ export default function AdminDashboard({ channels, categories, onRefreshAllData 
                   Unselect
                 </button>
               )}
+              {remoteUrl && (
+                <button
+                  type="button"
+                  onClick={() => setRemoteUrl("")}
+                  className="px-4 py-2 bg-slate-900 hover:bg-slate-800 border border-slate-800 rounded-xl text-xs font-semibold text-slate-450 transition cursor-pointer"
+                >
+                  Clear Link
+                </button>
+              )}
               <button
                 type="button"
-                disabled={!selectedFile || importLoading}
-                onClick={handleUploadAndImport}
-                className="flex items-center justify-center gap-1.5 px-6 py-2 bg-amber-600 hover:bg-amber-500 disabled:opacity-30 disabled:hover:bg-amber-600 text-white rounded-xl font-bold text-xs transition active:scale-95 cursor-pointer min-w-[140px]"
+                disabled={(!selectedFile && !remoteUrl) || importLoading}
+                onClick={selectedFile ? handleUploadAndImport : handleRemoteFetchAndImport}
+                className="flex items-center justify-center gap-1.5 px-6 py-2 bg-amber-600 hover:bg-amber-500 disabled:opacity-30 disabled:hover:bg-amber-600 text-white rounded-xl font-bold text-xs transition active:scale-95 cursor-pointer min-w-[150px]"
               >
                 {importLoading ? (
                   <RefreshCw className="w-3 px-1 animate-spin mx-auto" />
                 ) : (
                   <>
                     <UploadCloud className="w-4 h-4" />
-                    Decode Playlist Feeds
+                    {remoteUrl ? "Fetch & Decode Remote link" : "Decode Playlist Feeds"}
                   </>
                 )}
               </button>

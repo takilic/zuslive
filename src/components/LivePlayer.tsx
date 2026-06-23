@@ -20,6 +20,7 @@ export default function LivePlayer({ channel, onClose }: LivePlayerProps) {
   const [hasError, setHasError] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+  const [useStreamProxy, setUseStreamProxy] = useState(false);
   const [showControls, setShowControls] = useState(true);
   const [qualityLevels, setQualityLevels] = useState<any[]>([]);
   const [currentLevel, setCurrentLevel] = useState<number>(-1);
@@ -53,14 +54,17 @@ export default function LivePlayer({ channel, onClose }: LivePlayerProps) {
       hlsRef.current = null;
     }
 
-    const streamUrl = channel.streamUrl;
-
-    if (!streamUrl) {
+    const rawStreamUrl = channel.streamUrl;
+    if (!rawStreamUrl) {
       setHasError(true);
       setErrorMessage("No active stream URL provided for this IPTV Channel.");
       setIsLoading(false);
       return;
     }
+
+    const streamUrl = useStreamProxy 
+      ? `/api/stream-proxy?url=${encodeURIComponent(rawStreamUrl)}` 
+      : rawStreamUrl;
 
     // Connect standard HLS logic
     if (Hls.isSupported()) {
@@ -173,7 +177,7 @@ export default function LivePlayer({ channel, onClose }: LivePlayerProps) {
       setHasError(true);
       setErrorMessage("Your browser is outdated and does not support HLS (.m3u8) live streaming.");
     }
-  }, [channel]);
+  }, [channel, useStreamProxy]);
 
   // Volume slider sync
   useEffect(() => {
@@ -304,13 +308,28 @@ export default function LivePlayer({ channel, onClose }: LivePlayerProps) {
           <AlertTriangle className="w-14 h-14 text-yellow-500 mb-3" />
           <h4 className="text-lg font-display font-semibold text-slate-200">Livestream Antenna Failure</h4>
           <p className="text-xs text-red-400 max-w-md mt-1 mb-4">{errorMessage}</p>
-          <button 
-            type="button"
-            onClick={reloadStream}
-            className="flex items-center gap-2 px-5 py-2.5 bg-red-600 hover:bg-red-500 text-white rounded-lg font-medium text-sm transition-all shadow-md active:scale-95"
-          >
-            <RefreshCw className="w-4 h-4" /> Try Reconnecting Stream
-          </button>
+          <div className="flex flex-col sm:flex-row gap-2.5 items-center justify-center">
+            <button 
+              type="button"
+              onClick={reloadStream}
+              className="flex items-center gap-2 px-5 py-2.5 bg-red-600 hover:bg-red-500 text-white rounded-lg font-medium text-sm transition-all shadow-md active:scale-95 cursor-pointer text-xs"
+            >
+              <RefreshCw className="w-4 h-4" /> Try Reconnecting Stream
+            </button>
+            {!useStreamProxy && (
+              <button 
+                type="button"
+                onClick={() => {
+                  setUseStreamProxy(true);
+                  setHasError(false);
+                  setErrorMessage("");
+                }}
+                className="flex items-center gap-2 px-5 py-2.5 bg-amber-600 hover:bg-amber-500 text-white rounded-lg font-semibold text-sm transition-all shadow-md active:scale-95 cursor-pointer text-xs"
+              >
+                🔒 Play through Server CORS Proxy
+              </button>
+            )}
+          </div>
         </div>
       )}
 
@@ -414,6 +433,19 @@ export default function LivePlayer({ channel, onClose }: LivePlayerProps) {
                 <span className="hidden lg:inline-block text-[10px] font-mono text-slate-500 bg-slate-900/60 px-2 py-1 rounded border border-slate-800">
                   Buffer: {streamStats.bufferLength} &bull; Latency: {streamStats.latency} &bull; Codec: {streamStats.codec}
                 </span>
+
+                {/* Proxy routing toggle */}
+                <button
+                  onClick={() => setUseStreamProxy(!useStreamProxy)}
+                  className={`text-[10px] font-mono px-2.5 py-1 rounded border transition cursor-pointer select-none ${
+                    useStreamProxy 
+                      ? "bg-amber-600/35 text-amber-300 border-amber-500/40 font-bold" 
+                      : "bg-slate-900/60 text-slate-400 border-slate-800 hover:text-slate-250"
+                  }`}
+                  title="Enable/Disable proxy routing to bypass local browser CORS locks"
+                >
+                  Proxy: {useStreamProxy ? "Active" : "Bypass"}
+                </button>
 
                 {/* HLS Stream Quality Select Button */}
                 {qualityLevels.length > 0 && (
