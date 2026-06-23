@@ -31,7 +31,7 @@ if (typeof window !== 'undefined') {
     if (handleBenignError(msg, event.error)) {
       console.warn('Silenced benign third-party or script error:', msg);
       event.preventDefault();
-      event.stopPropagation();
+      event.stopImmediatePropagation();
     }
   }, true);
 
@@ -41,7 +41,7 @@ if (typeof window !== 'undefined') {
     if (handleBenignError(msg, reason)) {
       console.warn('Silenced benign unhandled rejection:', msg);
       event.preventDefault();
-      event.stopPropagation();
+      event.stopImmediatePropagation();
     }
   }, true);
 }
