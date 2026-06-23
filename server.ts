@@ -3,6 +3,17 @@ import fs from "fs";
 import path from "path";
 import { createServer as createViteServer } from "vite";
 import { Channel, Category, User, SubscriptionPlan, Analytics } from "./src/types.ts";
+import { initializeApp } from "firebase/app";
+import { 
+  initializeFirestore, 
+  collection, 
+  onSnapshot, 
+  doc, 
+  setDoc, 
+  deleteDoc, 
+  getDocs, 
+  writeBatch 
+} from "firebase/firestore";
 
 const app = express();
 const PORT = 3000;
@@ -184,6 +195,33 @@ function getInitialData() {
 }
 
 // Database helper functions
+let isFirebaseInitialized = false;
+let firebaseApp: any = null;
+let firestoreDb: any = null;
+let isFirebaseSyncingFromFirestore = false;
+let listenersActive = false;
+
+const firebaseConfigPath = path.join(process.cwd(), "firebase-applet-config.json");
+
+if (fs.existsSync(firebaseConfigPath)) {
+  try {
+    const config = JSON.parse(fs.readFileSync(firebaseConfigPath, "utf-8"));
+    if (config.projectId && config.apiKey) {
+      console.log("[FIREBASE] Initializing persistent Firestore client with database ID:", config.firestoreDatabaseId || "(default)");
+      firebaseApp = initializeApp({
+        apiKey: config.apiKey,
+        authDomain: config.authDomain,
+        projectId: config.projectId,
+        appId: config.appId
+      });
+      firestoreDb = initializeFirestore(firebaseApp, {}, config.firestoreDatabaseId || "(default)");
+      isFirebaseInitialized = true;
+    }
+  } catch (error) {
+    console.error("[FIREBASE ERROR] Could not read firebase config or initialize client SDK:", error);
+  }
+}
+
 function loadDB() {
   try {
     if (!fs.existsSync(DB_DIR)) {
@@ -202,7 +240,8 @@ function loadDB() {
   }
 }
 
-function saveDB(data: any) {
+// Local-only save to prevent write triggers during Firestore sync downs
+function saveDBLocalOnly(data: any) {
   try {
     if (!fs.existsSync(DB_DIR)) {
       fs.mkdirSync(DB_DIR, { recursive: true });
@@ -210,6 +249,241 @@ function saveDB(data: any) {
     fs.writeFileSync(DB_FILE, JSON.stringify(data, null, 2), "utf-8");
   } catch (error) {
     console.error("Failed to save local DB: ", error);
+  }
+}
+
+// 2-way sync: Save locally and trigger Cloud Firestore async update
+function saveDB(data: any) {
+  try {
+    // 1. Instantly save in local json database for high responsive local feeds
+    saveDBLocalOnly(data);
+    
+    // 2. Queue Firestore update asynchronously
+    if (isFirebaseInitialized && firestoreDb) {
+      syncToFirestore(data).catch(err => {
+        console.error("[FIREBASE SAVE FAIL]:", err);
+      });
+    }
+  } catch (error) {
+    console.error("Failed to save DB: ", error);
+  }
+}
+
+// Write the whole local DB structure to Firestore collections with deletion of outdated records
+async function syncToFirestore(dbData: any) {
+  if (!isFirebaseInitialized || !firestoreDb) return;
+  
+  isFirebaseSyncingFromFirestore = true;
+  try {
+    console.log("[FIREBASE] Syncing local dataset updates back to Cloud Firestore...");
+    
+    // 1. Sync small configuration entities
+    for (const cat of dbData.categories) {
+      await setDoc(doc(firestoreDb, "categories", cat.id), cat);
+    }
+    for (const plan of dbData.subscriptionPlans) {
+      await setDoc(doc(firestoreDb, "subscriptionPlans", plan.id), plan);
+    }
+    for (const usr of dbData.users) {
+      await setDoc(doc(firestoreDb, "users", usr.id), usr);
+    }
+    
+    // 2. Sync Channels (batched for performance up to 500 records)
+    const channels = dbData.channels;
+    let batch = writeBatch(firestoreDb);
+    let count = 0;
+    
+    for (const chan of channels) {
+      const channelRef = doc(firestoreDb, "channels", chan.id);
+      batch.set(channelRef, chan);
+      count++;
+      if (count === 500) {
+        await batch.commit();
+        batch = writeBatch(firestoreDb);
+        count = 0;
+      }
+    }
+    if (count > 0) {
+      await batch.commit();
+    }
+
+    // 3. Delete items in Firestore that are deleted locally
+    const [catSnap, plansSnap, usersSnap, chanSnap] = await Promise.all([
+      getDocs(collection(firestoreDb, "categories")),
+      getDocs(collection(firestoreDb, "subscriptionPlans")),
+      getDocs(collection(firestoreDb, "users")),
+      getDocs(collection(firestoreDb, "channels"))
+    ]);
+    
+    const localCatIds = new Set(dbData.categories.map((c: any) => c.id));
+    const localPlanIds = new Set(dbData.subscriptionPlans.map((p: any) => p.id));
+    const localUserIds = new Set(dbData.users.map((u: any) => u.id));
+    const localChanIds = new Set(dbData.channels.map((c: any) => c.id));
+    
+    for (const docSnap of catSnap.docs) {
+      if (!localCatIds.has(docSnap.id)) {
+        await deleteDoc(docSnap.ref);
+      }
+    }
+    for (const docSnap of plansSnap.docs) {
+      if (!localPlanIds.has(docSnap.id)) {
+        await deleteDoc(docSnap.ref);
+      }
+    }
+    for (const docSnap of usersSnap.docs) {
+      if (!localUserIds.has(docSnap.id)) {
+        await deleteDoc(docSnap.ref);
+      }
+    }
+    
+    let deleteBatch = writeBatch(firestoreDb);
+    let delCount = 0;
+    for (const docSnap of chanSnap.docs) {
+      if (!localChanIds.has(docSnap.id)) {
+        deleteBatch.delete(docSnap.ref);
+        delCount++;
+        if (delCount === 500) {
+          await deleteBatch.commit();
+          deleteBatch = writeBatch(firestoreDb);
+          delCount = 0;
+        }
+      }
+    }
+    if (delCount > 0) {
+      await deleteBatch.commit();
+    }
+    
+    console.log(`[FIREBASE] Cloud Firestore state synchronization complete. Sync'd ${channels.length} channels.`);
+  } catch (error) {
+    console.error("[FIREBASE ERROR] Could not sync local DB to Firestore:", error);
+  } finally {
+    // Hold block briefly to swallow incoming self-sync reflection events
+    setTimeout(() => {
+      isFirebaseSyncingFromFirestore = false;
+    }, 1200);
+  }
+}
+
+// Setup background snapshot listeners to auto-pull remote alterations in real-time
+function setupFirestoreListeners() {
+  if (!isFirebaseInitialized || !firestoreDb || listenersActive) return;
+  listenersActive = true;
+  
+  console.log("[FIREBASE] Registering real-time Firestore synchronization loops...");
+  
+  // 1. Categories Observer
+  onSnapshot(collection(firestoreDb, "categories"), (snapshot) => {
+    if (isFirebaseSyncingFromFirestore) return;
+    const db = loadDB();
+    const categories: Category[] = [];
+    snapshot.forEach(docSnap => {
+      categories.push(docSnap.data() as Category);
+    });
+    if (categories.length > 0) {
+      db.categories = categories;
+      saveDBLocalOnly(db);
+    }
+  });
+
+  // 2. Channels Observer
+  onSnapshot(collection(firestoreDb, "channels"), (snapshot) => {
+    if (isFirebaseSyncingFromFirestore) return;
+    const db = loadDB();
+    const channels: Channel[] = [];
+    snapshot.forEach(docSnap => {
+      channels.push(docSnap.data() as Channel);
+    });
+    if (channels.length > 0) {
+      db.channels = channels;
+      saveDBLocalOnly(db);
+    }
+  });
+
+  // 3. SubscriptionPlans Observer
+  onSnapshot(collection(firestoreDb, "subscriptionPlans"), (snapshot) => {
+    if (isFirebaseSyncingFromFirestore) return;
+    const db = loadDB();
+    const subscriptionPlans: SubscriptionPlan[] = [];
+    snapshot.forEach(docSnap => {
+      subscriptionPlans.push(docSnap.data() as SubscriptionPlan);
+    });
+    if (subscriptionPlans.length > 0) {
+      db.subscriptionPlans = subscriptionPlans;
+      saveDBLocalOnly(db);
+    }
+  });
+
+  // 4. Users Observer
+  onSnapshot(collection(firestoreDb, "users"), (snapshot) => {
+    if (isFirebaseSyncingFromFirestore) return;
+    const db = loadDB();
+    const users: User[] = [];
+    snapshot.forEach(docSnap => {
+      users.push(docSnap.data() as User);
+    });
+    if (users.length > 0) {
+      db.users = users;
+      saveDBLocalOnly(db);
+    }
+  });
+}
+
+// Startup handshake logic: Pull data first, if empty seed it with local data
+async function bootSyncFirebase() {
+  if (!isFirebaseInitialized || !firestoreDb) {
+    console.log("[FIREBASE] Bypassing Firestore setup because config was not found.");
+    return;
+  }
+  
+  try {
+    console.log("[FIREBASE] Querying initial Cloud Database feeds...");
+    const [catSnap, plansSnap, usersSnap, chanSnap] = await Promise.all([
+      getDocs(collection(firestoreDb, "categories")),
+      getDocs(collection(firestoreDb, "subscriptionPlans")),
+      getDocs(collection(firestoreDb, "users")),
+      getDocs(collection(firestoreDb, "channels"))
+    ]);
+    
+    const db = loadDB();
+    let hasCloudData = false;
+    
+    const cloudCategories: Category[] = [];
+    catSnap.forEach(d => { cloudCategories.push(d.data() as Category); });
+    
+    const cloudPlans: SubscriptionPlan[] = [];
+    plansSnap.forEach(d => { cloudPlans.push(d.data() as SubscriptionPlan); });
+    
+    const cloudUsers: User[] = [];
+    usersSnap.forEach(d => { cloudUsers.push(d.data() as User); });
+    
+    const cloudChannels: Channel[] = [];
+    chanSnap.forEach(d => { cloudChannels.push(d.data() as Channel); });
+
+    if (cloudCategories.length > 0 || cloudChannels.length > 0) {
+      hasCloudData = true;
+      console.log(`[FIREBASE] Found existing data on Cloud Firestore! Synchronizing down to local container:`);
+      console.log(`- Categories: ${cloudCategories.length}`);
+      console.log(`- Channels: ${cloudChannels.length}`);
+      console.log(`- Users: ${cloudUsers.length}`);
+      console.log(`- Plans: ${cloudPlans.length}`);
+      
+      db.categories = cloudCategories.length > 0 ? cloudCategories : db.categories;
+      db.channels = cloudChannels.length > 0 ? cloudChannels : db.channels;
+      db.users = cloudUsers.length > 0 ? cloudUsers : db.users;
+      db.subscriptionPlans = cloudPlans.length > 0 ? cloudPlans : db.subscriptionPlans;
+      
+      saveDBLocalOnly(db);
+    }
+    
+    if (!hasCloudData) {
+      console.log("[FIREBASE] Cloud Firestore database is currently empty! Bootstrapping local database content up to cloud...");
+      await syncToFirestore(db);
+    }
+    
+    // Begin 2-way real-time monitoring
+    setupFirestoreListeners();
+  } catch (error) {
+    console.error("[FIREBASE GLOBAL FAIL] Setup handshake failed:", error);
   }
 }
 
@@ -746,6 +1020,8 @@ async function startServer() {
 
   app.listen(PORT, "0.0.0.0", () => {
     console.log(`IPTV Streaming Service Server booting on http://0.0.0.0:${PORT}`);
+    // Trigger asynchronous 2-way handshake with Firestore 
+    bootSyncFirebase().catch(err => console.error("bootSyncFirebase failed:", err));
   });
 }
 
