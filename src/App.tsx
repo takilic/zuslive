@@ -92,10 +92,17 @@ export default function App() {
         const adminUser = usrData.find((u: User) => u.role === 'admin') || usrData[0];
         const defaultUser = usrData.find((u: User) => u.username.includes("Sarah")) || usrData[0];
 
-        if (isAIStudio) {
-          setCurrentUser(adminUser);
+        if (currentUser) {
+          const updatedSelf = usrData.find((u: User) => u.id === currentUser.id);
+          if (updatedSelf) {
+            setCurrentUser(updatedSelf);
+          }
         } else {
-          setCurrentUser(defaultUser);
+          if (isAIStudio) {
+            setCurrentUser(adminUser);
+          } else {
+            setCurrentUser(defaultUser);
+          }
         }
       }
     } catch (e) {
