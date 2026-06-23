@@ -7,8 +7,9 @@ import './index.css';
 if (typeof window !== 'undefined') {
   const handleBenignError = (message: any, errorObj?: any) => {
     const msg = String(message || '').toLowerCase();
-    const isScriptError = msg === 'script error.' || msg.includes('script error');
-    const isCrossOrigin = msg.includes('cross-origin') || msg.includes('crossorigin') || msg.includes('cors');
+    // Catch generic "script error" or blank cross-origin errors (which browsers label as "Script error." or "")
+    const isScriptError = !msg || msg === 'script error.' || msg.includes('script error');
+    const isCrossOrigin = msg.includes('cross-origin') || msg.includes('crossorigin') || msg.includes('cors') || msg.includes('origin');
     const isHlsException = msg.includes('hls') || (errorObj && String(errorObj).toLowerCase().includes('hls'));
     const isExtensionError = msg.includes('extension') || msg.includes('chrome-extension');
     
