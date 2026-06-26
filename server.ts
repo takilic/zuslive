@@ -20,8 +20,14 @@ app.use("/api", (req, res, next) => {
     const isLocalOrDev = host.includes("localhost") || 
                          host.includes("127.0.0.1") || 
                          host.includes("ais-dev-") || 
+                         host.includes("ais-pre-") || 
+                         host.includes(".run.app") || 
                          referer.includes("localhost") || 
-                         referer.includes("ais-dev-");
+                         referer.includes("127.0.0.1") || 
+                         referer.includes("ais-dev-") || 
+                         referer.includes("ais-pre-") || 
+                         referer.includes(".run.app") ||
+                         referer.includes("googleusercontent.com");
 
     if (!isLocalOrDev) {
       return res.status(403).json({
@@ -140,6 +146,16 @@ function getInitialData() {
 
   const users: User[] = [
     {
+      id: "usr-emdadulff12",
+      username: "Emdadul Admin",
+      email: "emdadulff12@gmail.com",
+      role: "admin",
+      subscriptionStatus: "active",
+      subscriptionExpiry: "2030-12-31T23:59:59.000Z",
+      planType: "VIP",
+      avatarUrl: "https://images.unsplash.com/photo-1534528741775-53994a69daeb?q=80&w=150&auto=format&fit=crop"
+    },
+    {
       id: "usr-admin",
       username: "IPTV Admin",
       email: "admin@iptvstream.com",
@@ -214,13 +230,47 @@ function loadDB() {
     if (!fs.existsSync(DB_DIR)) {
       fs.mkdirSync(DB_DIR, { recursive: true });
     }
+    let db: any;
     if (!fs.existsSync(DB_FILE)) {
-      const defaultData = getInitialData();
-      fs.writeFileSync(DB_FILE, JSON.stringify(defaultData, null, 2), "utf-8");
-      return defaultData;
+      db = getInitialData();
+      fs.writeFileSync(DB_FILE, JSON.stringify(db, null, 2), "utf-8");
+    } else {
+      const raw = fs.readFileSync(DB_FILE, "utf-8");
+      db = JSON.parse(raw);
     }
-    const raw = fs.readFileSync(DB_FILE, "utf-8");
-    return JSON.parse(raw);
+
+    // Ensure emdadulff12@gmail.com is present and is admin
+    const adminEmail = "emdadulff12@gmail.com";
+    const existingIndex = db.users.findIndex((u: any) => u.email && u.email.toLowerCase() === adminEmail.toLowerCase());
+    let changed = false;
+    if (existingIndex === -1) {
+      db.users.push({
+        id: "usr-emdadulff12",
+        username: "Emdadul Admin",
+        email: adminEmail,
+        role: "admin",
+        subscriptionStatus: "active",
+        subscriptionExpiry: "2030-12-31T23:59:59.000Z",
+        planType: "VIP",
+        avatarUrl: "https://images.unsplash.com/photo-1534528741775-53994a69daeb?q=80&w=150&auto=format&fit=crop",
+        isBlocked: false
+      });
+      changed = true;
+    } else if (db.users[existingIndex].role !== "admin") {
+      db.users[existingIndex].role = "admin";
+      changed = true;
+    }
+
+    if (changed) {
+      fs.writeFileSync(DB_FILE, JSON.stringify(db, null, 2), "utf-8");
+      // Trigger Firestore update if initialized
+      if (isFirebaseInitialized && firestoreDb) {
+        firestoreDb.collection("users").doc(db.users[existingIndex === -1 ? db.users.length - 1 : existingIndex].id).set(db.users[existingIndex === -1 ? db.users.length - 1 : existingIndex]).catch((err: any) => {
+          console.error("[FIREBASE SAVE FAIL]:", err);
+        });
+      }
+    }
+    return db;
   } catch (error) {
     console.error("Failed to load local DB: ", error);
     return getInitialData();

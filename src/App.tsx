@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { 
   Tv, 
   User as UserIcon, 
@@ -39,7 +39,9 @@ export default function App() {
   const isAIStudio = typeof window !== 'undefined' && (
     window.location.hostname.includes('localhost') ||
     window.location.hostname.includes('127.0.0.1') ||
-    window.location.hostname.includes('ais-dev-')
+    window.location.hostname.includes('ais-dev-') ||
+    window.location.hostname.includes('ais-pre-') ||
+    window.location.hostname.includes('.run.app')
   );
   
   // App navigation active states
@@ -51,6 +53,93 @@ export default function App() {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [purchaseSuccessMessage, setPurchaseSuccessMessage] = useState<string | null>(null);
+
+  // Login / Switch User States
+  const [isLoginModalOpen, setIsLoginModalOpen] = useState(false);
+  const [loginEmail, setLoginEmail] = useState('');
+  const [loginUsername, setLoginUsername] = useState('');
+  const [loginError, setLoginError] = useState('');
+  const [loginSuccess, setLoginSuccess] = useState('');
+
+  const handleCustomLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoginError('');
+    setLoginSuccess('');
+
+    if (!loginEmail.trim()) {
+      setLoginError('ইমেইল অ্যাড্রেস দিতে হবে');
+      return;
+    }
+
+    try {
+      setIsLoading(true);
+      const usrRes = await fetch("/api/users");
+      if (usrRes.ok) {
+        const usrData = await usrRes.json();
+        setUsers(usrData);
+
+        const matched = usrData.find((u: User) => u.email && u.email.toLowerCase() === loginEmail.trim().toLowerCase());
+        if (matched) {
+          setCurrentUser(matched);
+          setLoginSuccess(`স্বাগতম, ${matched.username}!`);
+          setTimeout(() => {
+            setIsLoginModalOpen(false);
+            setLoginEmail('');
+            setLoginUsername('');
+            setLoginSuccess('');
+            if (matched.role === 'admin') {
+              setActiveTab('admin-dashboard');
+            } else {
+              setActiveTab('home');
+            }
+          }, 1500);
+        } else {
+          // Dynamic registration!
+          const nameToUse = loginUsername.trim() || loginEmail.split('@')[0];
+          const isEmdadulAdmin = loginEmail.trim().toLowerCase() === "emdadulff12@gmail.com";
+          
+          const regRes = await fetch("/api/users", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              username: nameToUse,
+              email: loginEmail.trim().toLowerCase(),
+              role: isEmdadulAdmin ? "admin" : "user",
+              subscriptionStatus: "active",
+              subscriptionExpiry: new Date(Date.now() + 30 * 24 * 3600 * 1000).toISOString(),
+              planType: isEmdadulAdmin ? "VIP" : "Trial",
+              avatarUrl: "https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?q=80&w=150&auto=format&fit=crop"
+            })
+          });
+
+          if (regRes.ok) {
+            const newUser = await regRes.json();
+            await syncApplicationData();
+            setCurrentUser(newUser);
+            setLoginSuccess(`সফলভাবে রেজিস্টার করা হয়েছে! স্বাগতম, ${newUser.username}!`);
+            setTimeout(() => {
+              setIsLoginModalOpen(false);
+              setLoginEmail('');
+              setLoginUsername('');
+              setLoginSuccess('');
+              if (newUser.role === 'admin') {
+                setActiveTab('admin-dashboard');
+              } else {
+                setActiveTab('home');
+              }
+            }, 1500);
+          } else {
+            setLoginError('লগইন বা রেজিস্টার করা যায়নি। দয়া করে আবার চেষ্টা করুন।');
+          }
+        }
+      }
+    } catch (err) {
+      console.error(err);
+      setLoginError('সার্ভারে যোগাযোগ করতে ব্যর্থ হয়েছে।');
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   // Load and synchronize data from persistent Express backend
   const syncApplicationData = async () => {
@@ -86,7 +175,9 @@ export default function App() {
         const isAIStudio = typeof window !== 'undefined' && (
           window.location.hostname.includes('localhost') ||
           window.location.hostname.includes('127.0.0.1') ||
-          window.location.hostname.includes('ais-dev-')
+          window.location.hostname.includes('ais-dev-') ||
+          window.location.hostname.includes('ais-pre-') ||
+          window.location.hostname.includes('.run.app')
         );
 
         const adminUser = usrData.find((u: User) => u.role === 'admin') || usrData[0];
@@ -231,11 +322,43 @@ export default function App() {
             )}
           </nav>
 
-          {/* Clean Right side controls with premium status indicator */}
-          <div className="hidden md:flex items-center gap-3">
-            <span className="text-[11px] bg-red-500/10 text-red-400 px-3 py-1 rounded-full border border-red-505/20 uppercase tracking-widest font-black select-none animate-pulse">
+          {/* Clean Right side controls with premium status indicator and User Profile / Login Option */}
+          <div className="hidden md:flex items-center gap-3" id="desktop-profile-section">
+            <span className="text-[10px] bg-red-500/10 text-red-400 px-3 py-1 rounded-full border border-red-500/20 uppercase tracking-widest font-black select-none">
               ● decoder online
             </span>
+            
+            {currentUser ? (
+              <div className="flex items-center gap-2 pl-2 border-l border-slate-800">
+                <img 
+                  src={currentUser.avatarUrl} 
+                  alt={currentUser.username} 
+                  className="w-8 h-8 rounded-lg object-cover border border-slate-700 bg-slate-900" 
+                />
+                <div className="flex flex-col text-left">
+                  <span className="text-xs font-bold text-slate-100 truncate max-w-[120px]" title={currentUser.username}>
+                    {currentUser.username}
+                  </span>
+                  <span className="text-[9px] font-semibold text-red-400 uppercase tracking-wider font-mono">
+                    {currentUser.role === 'admin' ? 'Admin Operator' : `${currentUser.planType || 'Trial'} Pass`}
+                  </span>
+                </div>
+                <button
+                  onClick={() => setIsLoginModalOpen(true)}
+                  className="p-1.5 ml-1 text-slate-400 hover:text-white rounded-lg hover:bg-slate-900 transition cursor-pointer flex items-center justify-center"
+                  title="লগইন / ইউজার পরিবর্তন"
+                >
+                  <UserIcon className="w-4 h-4 text-slate-350" />
+                </button>
+              </div>
+            ) : (
+              <button
+                onClick={() => setIsLoginModalOpen(true)}
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-red-600 hover:bg-red-500 text-white rounded-lg text-xs font-bold transition shadow-lg shadow-red-600/25 cursor-pointer"
+              >
+                <UserIcon className="w-3.5 h-3.5" /> লগইন করুন
+              </button>
+            )}
           </div>
 
           {/* Mobile responsive toggle */}
@@ -253,11 +376,36 @@ export default function App() {
       {isMobileMenuOpen && (
         <div className="md:hidden block w-full bg-slate-950/95 border-b border-slate-800 p-4 shrink-0 transition-transform">
           <div className="flex flex-col gap-3">
+            {currentUser && (
+              <div className="flex items-center gap-3 p-2.5 bg-slate-900/60 rounded-xl border border-slate-850/85 mb-1 text-left">
+                <img 
+                  src={currentUser.avatarUrl} 
+                  alt={currentUser.username} 
+                  className="w-10 h-10 rounded-lg object-cover border border-slate-700 bg-slate-900" 
+                />
+                <div className="flex flex-col">
+                  <span className="text-sm font-bold text-slate-100">
+                    {currentUser.username}
+                  </span>
+                  <span className="text-[10px] font-semibold text-red-400 uppercase tracking-wider font-mono">
+                    {currentUser.role === 'admin' ? 'Admin Operator' : `${currentUser.planType || 'Trial'} Pass`}
+                  </span>
+                </div>
+              </div>
+            )}
+
             <button
-              onClick={() => { setActiveTab('home'); setIsMobileMenuOpen(false); }}
+              onClick={() => { setActiveTab('home'); setSelectedChannel(null); setIsMobileMenuOpen(false); }}
               className="text-left py-2 text-slate-300 text-sm font-semibold flex items-center gap-2 cursor-pointer"
             >
               <Compass className="w-4 h-4" /> Live Portal
+            </button>
+
+            <button
+              onClick={() => { setIsLoginModalOpen(true); setIsMobileMenuOpen(false); }}
+              className="text-left py-2 text-slate-300 text-sm font-semibold flex items-center gap-2 cursor-pointer border-t border-slate-900"
+            >
+              <UserIcon className="w-4 h-4 text-red-500" /> লগইন / প্রোফাইল পরিবর্তন
             </button>
 
             {currentUser?.role === 'admin' && (
@@ -562,6 +710,138 @@ export default function App() {
             >
               Start Decoding Now
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* Custom Login / Switch Profile Modal Overlay */}
+      {isLoginModalOpen && (
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-fade-in" id="login-modal-overlay">
+          <div className="max-w-md w-full bg-slate-900 border border-slate-800 p-6 rounded-2xl flex flex-col shadow-2xl relative">
+            
+            {/* Close button */}
+            <button 
+              onClick={() => {
+                setIsLoginModalOpen(false);
+                setLoginEmail('');
+                setLoginUsername('');
+                setLoginError('');
+                setLoginSuccess('');
+              }}
+              className="absolute top-4 right-4 text-slate-400 hover:text-white transition p-1 rounded-lg hover:bg-slate-850 cursor-pointer"
+            >
+              <X className="w-5 h-5" />
+            </button>
+
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-10 h-10 bg-red-600/10 text-red-500 rounded-xl flex items-center justify-center border border-red-500/20">
+                <UserIcon className="w-5.5 h-5.5" />
+              </div>
+              <div className="text-left">
+                <h3 className="font-display font-black text-white text-base">ডিভাইস লগইন / ইউজার পরিবর্তন</h3>
+                <p className="text-[10px] text-slate-400">লাইভ IPTV ডিকোডার এক্সেস করতে লগইন করুন</p>
+              </div>
+            </div>
+
+            {/* Error & Success Messages */}
+            {loginError && (
+              <div className="p-3 bg-red-950/45 border border-red-900/40 text-red-400 rounded-xl text-xs mb-4 flex items-center gap-2 text-left">
+                <span className="w-1.5 h-1.5 rounded-full bg-red-500 shrink-0"></span>
+                {loginError}
+              </div>
+            )}
+            {loginSuccess && (
+              <div className="p-3 bg-emerald-950/45 border border-emerald-900/40 text-emerald-400 rounded-xl text-xs mb-4 flex items-center gap-2 text-left">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0"></span>
+                {loginSuccess}
+              </div>
+            )}
+
+            {/* Tab Header */}
+            <div className="bg-slate-950 p-1 rounded-xl border border-slate-850 mb-5">
+              <div className="text-center py-2 text-xs font-semibold text-slate-200 bg-slate-900 border border-slate-800/80 rounded-lg">
+                ইমেইল লগইন / রেজিস্টার
+              </div>
+            </div>
+
+            {/* Email Form */}
+            <form onSubmit={handleCustomLogin} className="flex flex-col gap-4 text-left">
+              <div className="flex flex-col gap-1.5">
+                <label className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">ইমেইল অ্যাড্রেস</label>
+                <input 
+                  type="email"
+                  placeholder="যেমন: emdadulff12@gmail.com"
+                  value={loginEmail}
+                  onChange={(e) => setLoginEmail(e.target.value)}
+                  className="bg-slate-950 border border-slate-850 focus:border-red-600 focus:ring-1 focus:ring-red-600 text-white rounded-xl px-3.5 py-2.5 text-xs outline-none transition"
+                  required
+                />
+              </div>
+
+              {/* Username field (Optional, for sign up / dynamic registration) */}
+              <div className="flex flex-col gap-1.5">
+                <label className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">নাম (ঐচ্ছিক, নতুন রেজিস্ট্রেশনের জন্য)</label>
+                <input 
+                  type="text"
+                  placeholder="আপনার নাম লিখুন"
+                  value={loginUsername}
+                  onChange={(e) => setLoginUsername(e.target.value)}
+                  className="bg-slate-950 border border-slate-850 focus:border-red-600 focus:ring-1 focus:ring-red-600 text-white rounded-xl px-3.5 py-2.5 text-xs outline-none transition"
+                />
+              </div>
+
+              <button
+                type="submit"
+                className="w-full mt-2 py-3 bg-red-600 hover:bg-red-500 text-white rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer shadow-lg shadow-red-600/20 active:scale-98"
+              >
+                <span>পোর্টাল এক্সেস করুন</span>
+                <ArrowRight className="w-4 h-4" />
+              </button>
+            </form>
+
+            {/* Profile Grid Quick-Switch section */}
+            <div className="border-t border-slate-850 mt-5 pt-4">
+              <h4 className="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-3 text-left">
+                দ্রুত প্রোফাইল পরিবর্তন (Quick Switch Profiles)
+              </h4>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-[160px] overflow-y-auto pr-1">
+                {users.map((u) => (
+                  <button
+                    key={u.id}
+                    onClick={() => {
+                      setCurrentUser(u);
+                      setIsLoginModalOpen(false);
+                      setLoginEmail('');
+                      setLoginUsername('');
+                      setLoginError('');
+                      setLoginSuccess('');
+                      if (u.role === 'admin') {
+                        setActiveTab('admin-dashboard');
+                      } else {
+                        setActiveTab('home');
+                      }
+                    }}
+                    className={`flex items-center gap-2 p-2 rounded-xl border transition cursor-pointer active:scale-97 text-left w-full ${currentUser?.id === u.id ? 'bg-red-950/20 border-red-500/40' : 'bg-slate-950/40 border-slate-850 hover:bg-slate-950 hover:border-slate-800'}`}
+                  >
+                    <img 
+                      src={u.avatarUrl} 
+                      alt={u.username} 
+                      className="w-7 h-7 rounded-lg object-cover bg-slate-900 border border-slate-800"
+                    />
+                    <div className="min-w-0 flex-1">
+                      <div className="text-[11px] font-bold text-slate-200 truncate leading-tight flex items-center gap-1">
+                        {u.username}
+                        {u.role === 'admin' && (
+                          <span className="text-[8px] bg-red-500/10 text-red-400 px-1 rounded border border-red-500/20 font-mono scale-90">AD</span>
+                        )}
+                      </div>
+                      <div className="text-[9px] text-slate-500 truncate mt-0.5">{u.email}</div>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </div>
+
           </div>
         </div>
       )}
